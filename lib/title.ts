@@ -10,6 +10,10 @@ export type TerminalStatus = "idle" | "running"
 
 let lastTerminalTitle: string | null = null
 
+type TerminalWriter = Pick<NodeJS.WriteStream, "write"> & {
+    isTTY?: boolean
+}
+
 function sanitizeTerminalTitle(value: string): string {
     return value
         .replace(/[\u0007\u001b]/g, "")
@@ -19,7 +23,32 @@ function sanitizeTerminalTitle(value: string): string {
 
 function formatTerminalTitle(directory: string | undefined, status: TerminalStatus): string {
     const projectName = directory ? basename(directory) || "opencode" : "opencode"
-    return sanitizeTerminalTitle(`${projectName} : ${status}`)
+    const decoratedStatus = status === "running" ? "🟢 running" : "💤 idle"
+    return sanitizeTerminalTitle(`${projectName} : ${decoratedStatus}`)
+}
+
+function getTerminalWriter(): TerminalWriter | null {
+    if (process.stdout.isTTY) {
+        return process.stdout
+    }
+
+    if (process.stderr.isTTY) {
+        return process.stderr
+    }
+
+    return null
+}
+
+function wrapOscSequenceForTerminal(sequence: string): string {
+    const term = process.env.TERM ?? ""
+    const tmux = process.env.TMUX
+    const isScreenLike = term.startsWith("screen") || term.startsWith("tmux")
+
+    if (!tmux && !isScreenLike) {
+        return sequence
+    }
+
+    return `\u001bPtmux;${sequence.replace(/\u001b/g, "\u001b\u001b")}\u001b\\`
 }
 
 export function updateTerminalTitle(
@@ -28,8 +57,10 @@ export function updateTerminalTitle(
     logger: Logger
 ): void {
     try {
-        if (!process.stdout.isTTY) {
-            logger.debug("terminal-title", "Skipping terminal title update because stdout is not a TTY", {
+        const writer = getTerminalWriter()
+
+        if (!writer) {
+            logger.debug("terminal-title", "Skipping terminal title update because no TTY writer is available", {
                 status
             })
             return
@@ -41,13 +72,18 @@ export function updateTerminalTitle(
             return
         }
 
-        process.stdout.write(`\u001b]0;${title}\u0007`)
-        process.stdout.write(`\u001b]2;${title}\u0007`)
+        const osc0 = wrapOscSequenceForTerminal(`\u001b]0;${title}\u0007`)
+        const osc2 = wrapOscSequenceForTerminal(`\u001b]2;${title}\u0007`)
+
+        writer.write(osc0)
+        writer.write(osc2)
         lastTerminalTitle = title
 
         logger.debug("terminal-title", "Terminal title updated", {
             title,
-            status
+            status,
+            writer: writer === process.stdout ? "stdout" : "stderr",
+            tmux: Boolean(process.env.TMUX)
         })
     } catch (error: any) {
         logger.warn("terminal-title", "Failed to update terminal title", {
