@@ -25,7 +25,7 @@ function sanitizeTerminalTitle(value: string): string {
 
 function formatTerminalTitle(directory: string | undefined, status: TerminalStatus): string {
     const projectName = directory ? basename(directory) || "opencode" : "opencode"
-    const decoratedStatus = status === "running" ? "🟢 running" : "💤 idle"
+    const decoratedStatus = status === "running" ? "🟢" : "💤"
     return sanitizeTerminalTitle(`${decoratedStatus} ${projectName}`)
 }
 

@@ -4,20 +4,26 @@ on:
   push:
     tags:
       - 'v*'
-      
-permissions:
-  id-token: write  # Required for OIDC
-  contents: read
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Tag to publish (for example: v0.3.3)
+        required: true
+        type: string
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG_NAME }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -25,28 +31,33 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
-
+      - name: Install dependencies
+        run: npm install
 
       - name: Validate tag matches package version
         run: |
           PACKAGE_VERSION=$(node -p "require('./package.json').version")
-          TAG_NAME="${GITHUB_REF_NAME#v}"
+          TAG_VERSION="${TAG_NAME#v}"
 
-          if [ "$PACKAGE_VERSION" != "$TAG_NAME" ]; then
-            echo "Tag v$TAG_NAME does not match package.json version $PACKAGE_VERSION"
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "Tag $TAG_NAME does not match package.json version $PACKAGE_VERSION"
             exit 1
           fi
 
+      - name: Typecheck
+        run: npm run typecheck
 
+      - name: Build
+        run: npm run build
 
-      - name: Create GitHub release
+      - name: Create GitHub release if missing
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "${{ github.ref_name }}" --generate-notes
+        run: |
+          gh release view "$TAG_NAME" >/dev/null 2>&1 || \
+            gh release create "$TAG_NAME" --generate-notes
 
-      - run: npm install
-      - run: npm ci
-      - run: npm run build --if-present
-      - run: npm test
-      - run: npm publish
-
+      - name: Publish package
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

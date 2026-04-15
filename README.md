@@ -57,15 +57,15 @@ The plugin creates a default global config on first run.
 
 - Terminal title updates are best-effort and depend on your terminal supporting OSC title sequences
 - The plugin prefers TTY-safe writes and includes tmux/screen-compatible wrapping when needed
-- Running status is shown as `🟢 running`
-- Idle status is shown as `💤 idle`
+- Running status is shown as `🟢`
+- Idle status is shown as `💤`
 
 ## GitHub Actions Publish
 
 This repository includes GitHub Actions for CI and npm publishing.
 
 - `ci.yml` runs `npm run typecheck` and `npm run build` on pushes and pull requests to `master`
-- `publish.yml` runs on `v*` tag pushes, verifies that the tag matches `package.json.version`, creates the matching GitHub Release, and then publishes to npm
+- `publish.yml` runs on `v*` tag pushes and can also be started manually with a `tag_name` input; it checks that the tag matches `package.json.version`, creates the matching GitHub Release if needed, and then publishes to npm
 - Add an `NPM_TOKEN` repository secret in GitHub Actions settings before using the publish workflow
 - Keep the `package.json` version updated before pushing the `v*` tag that should create the GitHub Release and publish to npm
 
