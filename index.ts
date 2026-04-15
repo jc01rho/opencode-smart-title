@@ -28,7 +28,7 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
 
     const logger = new Logger(config.debug)
     const { client } = ctx
-
+    let lastTerminalStatusSync: { sessionId: string; status: TerminalStatus } | null = null
     const getEventSessionId = (event: { properties: unknown }): string | undefined => {
         if (!event.properties || typeof event.properties !== "object") {
             return undefined
@@ -47,11 +47,19 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
             return
         }
 
+        if (
+            lastTerminalStatusSync?.sessionId === sessionId &&
+            lastTerminalStatusSync.status === status
+        ) {
+            return
+        }
+
         if (await isSubagentSession(client, sessionId, logger)) {
             return
         }
 
         updateTerminalTitle(ctx.directory, status, logger)
+        lastTerminalStatusSync = { sessionId, status }
     }
 
     logger.info('plugin', 'Smart Title plugin initialized', {

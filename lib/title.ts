@@ -9,6 +9,8 @@ import { basename } from "path"
 export type TerminalStatus = "idle" | "running"
 
 let lastTerminalTitle: string | null = null
+const inFlightSessionTitleUpdates = new Set<string>()
+const queuedSessionTitleUpdates = new Set<string>()
 
 type TerminalWriter = Pick<NodeJS.WriteStream, "write"> & {
     isTTY?: boolean
@@ -189,6 +191,16 @@ export async function updateSessionTitle(
     logger: Logger,
     config: PluginConfig
 ): Promise<void> {
+    if (inFlightSessionTitleUpdates.has(sessionId)) {
+        queuedSessionTitleUpdates.add(sessionId)
+        logger.debug('update-title', 'Skipping duplicate session title update while one is already in flight', {
+            sessionId
+        })
+        return
+    }
+
+    inFlightSessionTitleUpdates.add(sessionId)
+
     try {
         logger.info('update-title', 'Title update triggered', { sessionId })
 
@@ -242,5 +254,14 @@ export async function updateSessionTitle(
             error: error.message,
             stack: error.stack
         })
+    } finally {
+        inFlightSessionTitleUpdates.delete(sessionId)
+
+        if (queuedSessionTitleUpdates.delete(sessionId)) {
+            logger.debug('update-title', 'Re-running queued session title update after in-flight completion', {
+                sessionId
+            })
+            await updateSessionTitle(client, sessionId, logger, config)
+        }
     }
 }
