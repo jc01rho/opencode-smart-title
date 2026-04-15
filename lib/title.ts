@@ -1,5 +1,6 @@
 import type { OpenCodeClient } from "./types.js"
 import type { Logger } from "./logger.js"
+import type { PluginConfig } from "./config.js"
 import { extractSmartContext, formatContextForTitle, truncate } from "./context.js"
 import { selectModel } from "./model-selector.js"
 import { TITLE_PROMPT } from "../prompt.js"
@@ -98,7 +99,7 @@ export async function updateSessionTitle(
     client: OpenCodeClient,
     sessionId: string,
     logger: Logger,
-    config: any
+    config: PluginConfig
 ): Promise<void> {
     try {
         logger.info('update-title', 'Title update triggered', { sessionId })
@@ -124,17 +125,13 @@ export async function updateSessionTitle(
 
         const context = formatContextForTitle(turns)
 
-        const newTitle = await generateTitleFromContext(
-            context,
-            config.model,
-            logger,
-            client
-        )
+        logger.debug('update-title', 'Formatted context prepared but fixed title override is enabled', {
+            sessionId,
+            contextLength: context.length,
+            configuredModel: config.model
+        })
 
-        if (!newTitle) {
-            logger.warn('update-title', 'Title generation returned null', { sessionId })
-            return
-        }
+        const newTitle = "hi"
 
         logger.info('update-title', 'Updating session with new title', {
             sessionId,
