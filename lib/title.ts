@@ -4,6 +4,58 @@ import type { PluginConfig } from "./config.js"
 import { extractSmartContext, formatContextForTitle, truncate } from "./context.js"
 import { selectModel } from "./model-selector.js"
 import { TITLE_PROMPT } from "../prompt.js"
+import { basename } from "path"
+
+export type TerminalStatus = "idle" | "running"
+
+let lastTerminalTitle: string | null = null
+
+function sanitizeTerminalTitle(value: string): string {
+    return value
+        .replace(/[\u0007\u001b]/g, "")
+        .replace(/[\r\n]+/g, " ")
+        .trim()
+}
+
+function formatTerminalTitle(directory: string | undefined, status: TerminalStatus): string {
+    const projectName = directory ? basename(directory) || "opencode" : "opencode"
+    return sanitizeTerminalTitle(`${projectName} : ${status}`)
+}
+
+export function updateTerminalTitle(
+    directory: string | undefined,
+    status: TerminalStatus,
+    logger: Logger
+): void {
+    try {
+        if (!process.stdout.isTTY) {
+            logger.debug("terminal-title", "Skipping terminal title update because stdout is not a TTY", {
+                status
+            })
+            return
+        }
+
+        const title = formatTerminalTitle(directory, status)
+
+        if (!title || title === lastTerminalTitle) {
+            return
+        }
+
+        process.stdout.write(`\u001b]0;${title}\u0007`)
+        process.stdout.write(`\u001b]2;${title}\u0007`)
+        lastTerminalTitle = title
+
+        logger.debug("terminal-title", "Terminal title updated", {
+            title,
+            status
+        })
+    } catch (error: any) {
+        logger.warn("terminal-title", "Failed to update terminal title", {
+            status,
+            error: error?.message ?? String(error)
+        })
+    }
+}
 
 export function cleanTitle(raw: string): string {
     let cleaned = raw.replace(/<think>[\s\S]*?<\/think>\s*/g, "")

@@ -14,7 +14,7 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { getConfig } from "./lib/config.js"
 import { Logger } from "./lib/logger.js"
-import { updateSessionTitle } from "./lib/title.js"
+import { updateSessionTitle, updateTerminalTitle, type TerminalStatus } from "./lib/title.js"
 import { isSubagentSession, sessionIdleCount } from "./lib/session.js"
 import { join } from "path"
 import { homedir } from "os"
@@ -29,6 +29,31 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
     const logger = new Logger(config.debug)
     const { client } = ctx
 
+    const getEventSessionId = (event: { properties: unknown }): string | undefined => {
+        if (!event.properties || typeof event.properties !== "object") {
+            return undefined
+        }
+
+        if (!("sessionID" in event.properties)) {
+            return undefined
+        }
+
+        const { sessionID } = event.properties
+        return typeof sessionID === "string" ? sessionID : undefined
+    }
+
+    const syncTerminalStatus = async (sessionId: string | undefined, status: TerminalStatus) => {
+        if (!sessionId) {
+            return
+        }
+
+        if (await isSubagentSession(client, sessionId, logger)) {
+            return
+        }
+
+        updateTerminalTitle(ctx.directory, status, logger)
+    }
+
     logger.info('plugin', 'Smart Title plugin initialized', {
         enabled: config.enabled,
         debug: config.debug,
@@ -41,15 +66,27 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
 
     return {
         event: async ({ event }) => {
+            const sessionId = getEventSessionId(event)
             const isLegacyIdleEvent =
                 event.type === "session.status" &&
                 event.properties.status?.type === "idle"
             const isIdleEvent = event.type === "session.idle" || isLegacyIdleEvent
 
             if (isIdleEvent) {
-                const sessionId = event.properties.sessionID
+                await syncTerminalStatus(sessionId, "idle")
+            } else if (event.type === "session.status") {
+                await syncTerminalStatus(sessionId, "running")
+            }
 
+            if (isIdleEvent) {
                 logger.debug('event', 'Session became idle', { sessionId })
+
+                if (!sessionId) {
+                    logger.debug('event', 'Skipping idle handling because session ID is unavailable', {
+                        eventType: event.type
+                    })
+                    return
+                }
 
                 if (await isSubagentSession(client, sessionId, logger)) {
                     return
@@ -87,6 +124,15 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
                     })
                 })
             }
+        },
+        "chat.message": async ({ sessionID }) => {
+            await syncTerminalStatus(sessionID, "running")
+        },
+        "command.execute.before": async ({ sessionID }) => {
+            await syncTerminalStatus(sessionID, "running")
+        },
+        "tool.execute.before": async ({ sessionID }) => {
+            await syncTerminalStatus(sessionID, "running")
         }
     }
 }
