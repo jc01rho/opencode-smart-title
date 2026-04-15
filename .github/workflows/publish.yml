@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - 'v*'
+      
+permissions:
+  id-token: write  # Required for OIDC
+  contents: read
 
 jobs:
   publish:
@@ -21,8 +25,7 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
-      - name: Install dependencies
-        run: npm install
+
 
       - name: Validate tag matches package version
         run: |
@@ -34,18 +37,15 @@ jobs:
             exit 1
           fi
 
-      - name: Typecheck
-        run: npm run typecheck
 
-      - name: Build
-        run: npm run build
 
       - name: Create GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release create "${{ github.ref_name }}" --generate-notes
 
-      - name: Publish package
-        run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: npm ci
+      - run: npm run build --if-present
+      - run: npm test
+      - run: npm publish
+
