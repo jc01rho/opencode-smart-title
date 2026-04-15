@@ -2,10 +2,15 @@
 
 Auto-generates meaningful session titles for your OpenCode conversations using AI.
 
+It also syncs your terminal window title with the current project and session activity.
+
 ## What It Does
 
 - Watches your conversation and generates short, descriptive titles
 - Updates automatically when the session becomes idle (you stop typing)
+- Syncs the terminal title as `<project> : <status>`
+- Shows activity with emoji states like `🟢 running` and `💤 idle`
+- Avoids redundant title writes and repeated session lookups during event bursts
 - Uses OpenCode's unified auth - no API keys needed
 - Works with any authenticated AI provider
 
@@ -47,6 +52,13 @@ The plugin creates a default global config on first run.
   "updateThreshold": 1
 }
 ```
+
+## Terminal Title Behavior
+
+- Terminal title updates are best-effort and depend on your terminal supporting OSC title sequences
+- The plugin prefers TTY-safe writes and includes tmux/screen-compatible wrapping when needed
+- Running status is shown as `🟢 running`
+- Idle status is shown as `💤 idle`
 
 ## License
 
