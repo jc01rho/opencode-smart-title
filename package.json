@@ -31,6 +31,9 @@
     "url": "https://github.com/jc01rho/opencode-smart-title/issues"
   },
   "homepage": "https://github.com/jc01rho/opencode-smart-title#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "author": "Dan Mindru",
   "license": "MIT",
   "peerDependencies": {
