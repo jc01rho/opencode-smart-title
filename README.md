@@ -60,6 +60,15 @@ The plugin creates a default global config on first run.
 - Running status is shown as `🟢 running`
 - Idle status is shown as `💤 idle`
 
+## GitHub Actions Publish
+
+This repository includes GitHub Actions for CI and npm publishing.
+
+- `ci.yml` runs `npm run typecheck` and `npm run build` on pushes and pull requests to `master`
+- `publish.yml` publishes to npm when a GitHub Release is published, and can also be run manually with `workflow_dispatch`
+- Add an `NPM_TOKEN` repository secret in GitHub Actions settings before using the publish workflow
+- Keep the `package.json` version updated before creating the GitHub Release that should publish to npm
+
 ## License
 
 MIT
