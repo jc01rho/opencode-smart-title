@@ -58,6 +58,7 @@ The plugin creates a default global config on first run.
 - Terminal title updates are best-effort and depend on your terminal supporting OSC title sequences
 - The plugin prefers TTY-safe writes and includes tmux/screen-compatible wrapping when needed
 - Running status is shown as `🟢`
+- Subagent-only activity while the main session is idle is shown as `🤖`
 - Idle status is shown as `💤`
 
 ## GitHub Actions Publish

@@ -6,7 +6,7 @@ import { selectModel } from "./model-selector.js"
 import { TITLE_PROMPT } from "../prompt.js"
 import { basename } from "path"
 
-export type TerminalStatus = "idle" | "running"
+export type TerminalStatus = "idle" | "running" | "subagent"
 
 let lastTerminalTitle: string | null = null
 const inFlightSessionTitleUpdates = new Set<string>()
@@ -25,7 +25,7 @@ function sanitizeTerminalTitle(value: string): string {
 
 function formatTerminalTitle(directory: string | undefined, status: TerminalStatus): string {
     const projectName = directory ? basename(directory) || "opencode" : "opencode"
-    const decoratedStatus = status === "running" ? "🟢" : "💤"
+    const decoratedStatus = status === "running" ? "🟢" : status === "subagent" ? "🤖" : "💤"
     return sanitizeTerminalTitle(`${decoratedStatus} ${projectName}`)
 }
 

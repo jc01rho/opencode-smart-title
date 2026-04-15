@@ -15,9 +15,11 @@ import type { Plugin } from "@opencode-ai/plugin"
 import { getConfig } from "./lib/config.js"
 import { Logger } from "./lib/logger.js"
 import { updateSessionTitle, updateTerminalTitle, type TerminalStatus } from "./lib/title.js"
-import { isSubagentSession, sessionIdleCount } from "./lib/session.js"
+import { getRootSessionID, isSubagentSession, sessionIdleCount } from "./lib/session.js"
 import { join } from "path"
 import { homedir } from "os"
+
+const SUBAGENT_ACTIVITY_TTL_MS = 5 * 60 * 1000
 
 const SmartTitlePlugin: Plugin = async (ctx) => {
     const config = getConfig(ctx)
@@ -28,7 +30,9 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
 
     const logger = new Logger(config.debug)
     const { client } = ctx
-    let lastTerminalStatusSync: { sessionId: string; status: TerminalStatus } | null = null
+    let lastTerminalStatusSync: { rootSessionId: string; status: TerminalStatus } | null = null
+    const rootSessionStatuses = new Map<string, Extract<TerminalStatus, "idle" | "running">>()
+    const activeSubagentsByRoot = new Map<string, Map<string, number>>()
     const getEventSessionId = (event: { properties: unknown }): string | undefined => {
         if (!event.properties || typeof event.properties !== "object") {
             return undefined
@@ -42,24 +46,110 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
         return typeof sessionID === "string" ? sessionID : undefined
     }
 
-    const syncTerminalStatus = async (sessionId: string | undefined, status: TerminalStatus) => {
+    const getActiveSubagentMap = (rootSessionId: string): Map<string, number> => {
+        let activeSubagents = activeSubagentsByRoot.get(rootSessionId)
+
+        if (!activeSubagents) {
+            activeSubagents = new Map<string, number>()
+            activeSubagentsByRoot.set(rootSessionId, activeSubagents)
+        }
+
+        return activeSubagents
+    }
+
+    const pruneExpiredSubagentActivity = (rootSessionId: string) => {
+        const activeSubagents = activeSubagentsByRoot.get(rootSessionId)
+
+        if (!activeSubagents) {
+            return
+        }
+
+        const now = Date.now()
+
+        for (const [subagentSessionId, lastSeenActiveAt] of activeSubagents.entries()) {
+            if (now - lastSeenActiveAt > SUBAGENT_ACTIVITY_TTL_MS) {
+                activeSubagents.delete(subagentSessionId)
+                logger.debug("terminal-title", "Pruned stale subagent activity from terminal state", {
+                    rootSessionId,
+                    subagentSessionId,
+                    ttlMs: SUBAGENT_ACTIVITY_TTL_MS
+                })
+            }
+        }
+
+        if (activeSubagents.size === 0) {
+            activeSubagentsByRoot.delete(rootSessionId)
+        }
+    }
+
+    const markSubagentActivity = (rootSessionId: string, sessionId: string, isActive: boolean) => {
+        const activeSubagents = getActiveSubagentMap(rootSessionId)
+
+        if (isActive) {
+            activeSubagents.set(sessionId, Date.now())
+            return
+        }
+
+        activeSubagents.delete(sessionId)
+
+        if (activeSubagents.size === 0) {
+            activeSubagentsByRoot.delete(rootSessionId)
+        }
+    }
+
+    const getEffectiveTerminalStatus = (rootSessionId: string): TerminalStatus => {
+        pruneExpiredSubagentActivity(rootSessionId)
+
+        if (rootSessionStatuses.get(rootSessionId) === "running") {
+            return "running"
+        }
+
+        const activeSubagents = activeSubagentsByRoot.get(rootSessionId)
+
+        if (activeSubagents && activeSubagents.size > 0) {
+            return "subagent"
+        }
+
+        return "idle"
+    }
+
+    const syncTerminalStatus = async (sessionId: string | undefined, status: Extract<TerminalStatus, "idle" | "running">) => {
         if (!sessionId) {
             return
         }
 
+        const isSubagent = await isSubagentSession(client, sessionId, logger)
+        const rootSessionId = isSubagent
+            ? await getRootSessionID(client, sessionId, logger)
+            : sessionId
+
+        if (isSubagent) {
+            markSubagentActivity(rootSessionId, sessionId, status === "running")
+        } else {
+            rootSessionStatuses.set(rootSessionId, status)
+        }
+
+        const effectiveStatus = getEffectiveTerminalStatus(rootSessionId)
+
         if (
-            lastTerminalStatusSync?.sessionId === sessionId &&
-            lastTerminalStatusSync.status === status
+            lastTerminalStatusSync?.rootSessionId === rootSessionId &&
+            lastTerminalStatusSync.status === effectiveStatus
         ) {
             return
         }
 
-        if (await isSubagentSession(client, sessionId, logger)) {
-            return
-        }
+        updateTerminalTitle(ctx.directory, effectiveStatus, logger)
+        lastTerminalStatusSync = { rootSessionId, status: effectiveStatus }
 
-        updateTerminalTitle(ctx.directory, status, logger)
-        lastTerminalStatusSync = { sessionId, status }
+        logger.debug("terminal-title", "Synchronized effective terminal status", {
+            sessionId,
+            rootSessionId,
+            isSubagent,
+            requestedStatus: status,
+            effectiveStatus,
+            activeSubagentCount: activeSubagentsByRoot.get(rootSessionId)?.size ?? 0,
+            rootStatus: rootSessionStatuses.get(rootSessionId) ?? "idle"
+        })
     }
 
     logger.info('plugin', 'Smart Title plugin initialized', {
@@ -97,6 +187,9 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
                 }
 
                 if (await isSubagentSession(client, sessionId, logger)) {
+                    logger.debug('event', 'Skipping AI title generation for subagent idle event', {
+                        sessionId
+                    })
                     return
                 }
 
