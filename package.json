@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@tarquinen/opencode-smart-title",
+  "name": "@jc01rho/opencode-smart-title",
   "version": "0.1.7",
   "type": "module",
   "description": "OpenCode plugin that automatically generates meaningful session titles using AI and smart context selection",
@@ -25,12 +25,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Tarquinen/opencode-smart-title.git"
+    "url": "git+https://github.com/jc01rho/opencode-smart-title.git"
   },
   "bugs": {
-    "url": "https://github.com/Tarquinen/opencode-smart-title/issues"
+    "url": "https://github.com/jc01rho/opencode-smart-title/issues"
   },
-  "homepage": "https://github.com/Tarquinen/opencode-smart-title#readme",
+  "homepage": "https://github.com/jc01rho/opencode-smart-title#readme",
   "author": "Dan Mindru",
   "license": "MIT",
   "peerDependencies": {
