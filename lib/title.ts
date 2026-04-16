@@ -225,13 +225,22 @@ export async function updateSessionTitle(
 
         const context = formatContextForTitle(turns)
 
-        logger.debug('update-title', 'Formatted context prepared but fixed title override is enabled', {
+        logger.debug('update-title', 'Formatted context prepared for title generation', {
             sessionId,
             contextLength: context.length,
             configuredModel: config.model
         })
 
-        const newTitle = "hi"
+        const newTitle = await generateTitleFromContext(context, config.model, logger, client)
+
+        if (!newTitle) {
+            logger.warn('update-title', 'Title generation returned no title, keeping existing session title', {
+                sessionId,
+                contextLength: context.length,
+                configuredModel: config.model
+            })
+            return
+        }
 
         logger.info('update-title', 'Updating session with new title', {
             sessionId,
