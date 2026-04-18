@@ -1,18 +1,41 @@
 # Smart Title Plugin
 
-Auto-generates meaningful session titles for your OpenCode conversations using AI.
+An OpenCode plugin that generates better session titles from conversation context and keeps the terminal window title in sync with session activity.
 
-It also syncs your terminal window title with the current project and session activity.
+> [!WARNING]
+> This project has only been tested in **Windows Terminal + WSL2 Ubuntu**.
+> Terminal title updates are terminal-dependent, so behavior in other terminals, shells, tmux setups, or operating systems may differ.
 
-## What It Does
+## What this plugin does
 
-- Watches your conversation and generates short, descriptive titles
-- Updates automatically when the session becomes idle (you stop typing)
-- Syncs the terminal title as `<project> : <status>`
-- Shows activity with emoji states like `🟢 running` and `💤 idle`
-- Avoids redundant title writes and repeated session lookups during event bursts
-- Uses OpenCode's unified auth - no API keys needed
-- Works with any authenticated AI provider
+- Generates short, meaningful session titles with AI
+- Triggers title generation when the root session becomes idle
+- Skips AI title generation for subagent sessions
+- Updates the terminal title to reflect current activity
+- Shows terminal activity states as:
+  - `🟢 <project>` while the root session is active
+  - `🤖 <project>` when only subagents are active
+  - `💤 <project>` when the session is idle
+- Avoids redundant terminal writes and duplicate in-flight title updates
+- Uses OpenCode authentication flow instead of requiring separate API keys in this plugin
+
+## How it works
+
+The main title update flow starts from the plugin event handler in `index.ts`.
+
+1. The plugin listens for `session.idle` events.
+2. When the idle threshold is reached, it collects smart conversation context.
+3. It generates a session title with the configured model or a fallback model.
+4. It updates the OpenCode session title.
+5. In parallel, it updates the terminal window title using OSC title sequences on a best-effort basis.
+
+Because terminal title updates rely on escape sequences instead of a dedicated terminal plugin API, terminal support is not guaranteed outside the tested environment.
+
+## Requirements
+
+- OpenCode with plugin support
+- `@opencode-ai/plugin` version `>=0.13.7`
+- An authenticated provider available through your OpenCode setup
 
 ## Installation
 
@@ -20,7 +43,7 @@ It also syncs your terminal window title with the current project and session ac
 npm install @jc01rho/opencode-smart-title
 ```
 
-Add to `~/.config/opencode/opencode.json`:
+Then add the plugin to your OpenCode config:
 
 ```json
 {
@@ -30,45 +53,61 @@ Add to `~/.config/opencode/opencode.json`:
 
 ## Configuration
 
-The plugin supports both global and project-level configuration:
+The plugin supports both global and project-level configuration.
 
-- **Global:** `~/.config/opencode/smart-title.jsonc` - Applies to all sessions
-- **Project:** `.opencode/smart-title.jsonc` - Overrides global config
+- Global config: `~/.config/opencode/smart-title.jsonc`
+- Project config: `.opencode/smart-title.jsonc`
 
-The plugin creates a default global config on first run.
+If no global config exists yet, the plugin creates a default one on first run.
+
+Project config overrides global config.
+
+### Example config
 
 ```jsonc
 {
   // Enable or disable the plugin
   "enabled": true,
 
-  // Enable debug logging
+  // Write debug logs to ~/.config/opencode/logs/smart-title/YYYY-MM-DD.log
   "debug": false,
 
-  // Optional: Use a specific model (otherwise uses smart fallbacks)
+  // Optional: force a specific model
+  // Format: "provider/model"
   // "model": "anthropic/claude-haiku-4-5",
 
-  // Update title every N idle events (1 = every time you pause)
+  // Generate a title every N idle events
   "updateThreshold": 1
 }
 ```
 
-## Terminal Title Behavior
+## Terminal title behavior
 
-- Terminal title updates are best-effort and depend on your terminal supporting OSC title sequences
-- The plugin prefers TTY-safe writes and includes tmux/screen-compatible wrapping when needed
-- Running status is shown as `🟢`
-- Subagent-only activity while the main session is idle is shown as `🤖`
-- Idle status is shown as `💤`
+Terminal title sync is best-effort.
 
-## GitHub Actions Publish
+- The plugin writes OSC title sequences to an available TTY stream
+- It includes tmux/screen-compatible wrapping when needed
+- It sanitizes terminal title content before writing
+- It skips writes when no TTY is available
+- It avoids rewriting the same title repeatedly
 
-This repository includes GitHub Actions for CI and npm publishing.
+This part of the plugin is the most environment-sensitive behavior in the project.
+If you are not using Windows Terminal with WSL2 Ubuntu, expect possible differences.
 
-- `ci.yml` runs `npm run typecheck` and `npm run build` on pushes and pull requests to `master`
-- `publish.yml` runs on `v*` tag pushes and can also be started manually with a `tag_name` input; it checks that the tag matches `package.json.version`, creates the matching GitHub Release if needed, and then publishes to npm
-- Add an `NPM_TOKEN` repository secret in GitHub Actions settings before using the publish workflow
-- Keep the `package.json` version updated before pushing the `v*` tag that should create the GitHub Release and publish to npm
+## Development
+
+```bash
+npm run typecheck
+npm run build
+```
+
+## Package contents
+
+The published package includes:
+
+- `dist/`
+- `README.md`
+- `LICENSE`
 
 ## License
 
