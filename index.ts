@@ -39,7 +39,12 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
         }
 
         if (!("sessionID" in event.properties)) {
-            return undefined
+            if (!("info" in event.properties) || !event.properties.info || typeof event.properties.info !== "object") {
+                return undefined
+            }
+
+            const { id } = event.properties.info as { id?: unknown }
+            return typeof id === "string" ? id : undefined
         }
 
         const { sessionID } = event.properties
@@ -124,7 +129,9 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
             : sessionId
 
         if (isSubagent) {
-            markSubagentActivity(rootSessionId, sessionId, status === "running")
+            if (status === "running") {
+                markSubagentActivity(rootSessionId, sessionId, true)
+            }
         } else {
             rootSessionStatuses.set(rootSessionId, status)
         }
@@ -152,6 +159,41 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
         })
     }
 
+    const clearSubagentActivity = async (sessionId: string | undefined) => {
+        if (!sessionId) {
+            return
+        }
+
+        const isSubagent = await isSubagentSession(client, sessionId, logger)
+
+        if (!isSubagent) {
+            return
+        }
+
+        const rootSessionId = await getRootSessionID(client, sessionId, logger)
+        markSubagentActivity(rootSessionId, sessionId, false)
+
+        const effectiveStatus = getEffectiveTerminalStatus(rootSessionId)
+
+        if (
+            lastTerminalStatusSync?.rootSessionId === rootSessionId &&
+            lastTerminalStatusSync.status === effectiveStatus
+        ) {
+            return
+        }
+
+        updateTerminalTitle(ctx.directory, effectiveStatus, logger)
+        lastTerminalStatusSync = { rootSessionId, status: effectiveStatus }
+
+        logger.debug("terminal-title", "Cleared subagent activity from terminal state", {
+            sessionId,
+            rootSessionId,
+            effectiveStatus,
+            activeSubagentCount: activeSubagentsByRoot.get(rootSessionId)?.size ?? 0,
+            rootStatus: rootSessionStatuses.get(rootSessionId) ?? "idle"
+        })
+    }
+
     logger.info('plugin', 'Smart Title plugin initialized', {
         enabled: config.enabled,
         debug: config.debug,
@@ -165,6 +207,12 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
     return {
         event: async ({ event }) => {
             const sessionId = getEventSessionId(event)
+
+            if (event.type === "session.deleted") {
+                await clearSubagentActivity(sessionId)
+                return
+            }
+
             const isLegacyIdleEvent =
                 event.type === "session.status" &&
                 event.properties.status?.type === "idle"
