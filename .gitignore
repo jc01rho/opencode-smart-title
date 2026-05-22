@@ -3,6 +3,9 @@ node_modules/
 bun.lock
 package-lock.json
 
+# Node compile cache
+node-compile-cache/
+
 # Build output
 dist/
 *.tgz

@@ -20,6 +20,7 @@ import { join } from "path"
 import { homedir } from "os"
 
 const SUBAGENT_ACTIVITY_TTL_MS = 5 * 60 * 1000
+const IDLE_DEBOUNCE_MS = 3000
 
 const SmartTitlePlugin: Plugin = async (ctx) => {
     const config = getConfig(ctx)
@@ -33,6 +34,7 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
     let lastTerminalStatusSync: { rootSessionId: string; status: TerminalStatus } | null = null
     const rootSessionStatuses = new Map<string, Extract<TerminalStatus, "idle" | "running">>()
     const activeSubagentsByRoot = new Map<string, Map<string, number>>()
+    const pendingIdleTimers = new Map<string, NodeJS.Timeout>()
     const getEventSessionId = (event: { properties: unknown }): string | undefined => {
         if (!event.properties || typeof event.properties !== "object") {
             return undefined
@@ -118,6 +120,17 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
         return "idle"
     }
 
+    const cancelPendingIdleTimer = (rootSessionId: string) => {
+        const timer = pendingIdleTimers.get(rootSessionId)
+        if (timer) {
+            clearTimeout(timer)
+            pendingIdleTimers.delete(rootSessionId)
+            logger.debug("terminal-title", "Cancelled pending idle timer due to running event", {
+                rootSessionId
+            })
+        }
+    }
+
     const syncTerminalStatus = async (sessionId: string | undefined, status: Extract<TerminalStatus, "idle" | "running">) => {
         if (!sessionId) {
             return
@@ -128,12 +141,45 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
             ? await getRootSessionID(client, sessionId, logger)
             : sessionId
 
+        if (status === "running") {
+            cancelPendingIdleTimer(rootSessionId)
+        }
+
         if (isSubagent) {
             if (status === "running") {
                 markSubagentActivity(rootSessionId, sessionId, true)
             }
         } else {
             rootSessionStatuses.set(rootSessionId, status)
+        }
+
+        if (status === "idle") {
+            if (pendingIdleTimers.has(rootSessionId)) {
+                return
+            }
+
+            const timer = setTimeout(() => {
+                pendingIdleTimers.delete(rootSessionId)
+                const effectiveStatus = getEffectiveTerminalStatus(rootSessionId)
+
+                if (
+                    lastTerminalStatusSync?.rootSessionId === rootSessionId &&
+                    lastTerminalStatusSync.status === effectiveStatus
+                ) {
+                    return
+                }
+
+                updateTerminalTitle(ctx.directory, effectiveStatus, logger)
+                lastTerminalStatusSync = { rootSessionId, status: effectiveStatus }
+
+                logger.debug("terminal-title", "Debounced idle sync applied", {
+                    rootSessionId,
+                    effectiveStatus
+                })
+            }, IDLE_DEBOUNCE_MS)
+
+            pendingIdleTimers.set(rootSessionId, timer)
+            return
         }
 
         const effectiveStatus = getEffectiveTerminalStatus(rootSessionId)
