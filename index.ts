@@ -148,12 +148,37 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
         if (isSubagent) {
             if (status === "running") {
                 markSubagentActivity(rootSessionId, sessionId, true)
+            } else {
+                markSubagentActivity(rootSessionId, sessionId, false)
             }
         } else {
             rootSessionStatuses.set(rootSessionId, status)
         }
 
         if (status === "idle") {
+            if (isSubagent) {
+                const effectiveStatus = getEffectiveTerminalStatus(rootSessionId)
+
+                if (
+                    lastTerminalStatusSync?.rootSessionId === rootSessionId &&
+                    lastTerminalStatusSync.status === effectiveStatus
+                ) {
+                    return
+                }
+
+                updateTerminalTitle(ctx.directory, effectiveStatus, logger)
+                lastTerminalStatusSync = { rootSessionId, status: effectiveStatus }
+
+                logger.debug("terminal-title", "Subagent idle, recalculated effective terminal status", {
+                    sessionId,
+                    rootSessionId,
+                    effectiveStatus,
+                    activeSubagentCount: activeSubagentsByRoot.get(rootSessionId)?.size ?? 0,
+                    rootStatus: rootSessionStatuses.get(rootSessionId) ?? "idle"
+                })
+                return
+            }
+
             if (pendingIdleTimers.has(rootSessionId)) {
                 return
             }
