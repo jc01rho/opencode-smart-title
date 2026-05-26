@@ -16,11 +16,12 @@ import { getConfig } from "./lib/config.js"
 import { Logger } from "./lib/logger.js"
 import { updateSessionTitle, updateTerminalTitle, type TerminalStatus } from "./lib/title.js"
 import { getRootSessionID, isSubagentSession, sessionIdleCount } from "./lib/session.js"
+import type { Message } from "./lib/types.js"
 import { join } from "path"
 import { homedir } from "os"
 
 const SUBAGENT_ACTIVITY_TTL_MS = 5 * 60 * 1000
-const IDLE_DEBOUNCE_MS = 3000
+const IDLE_DEBOUNCE_MS = 5000
 
 const SmartTitlePlugin: Plugin = async (ctx) => {
     const config = getConfig(ctx)
@@ -183,8 +184,39 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
                 return
             }
 
-            const timer = setTimeout(() => {
+            const timer = setTimeout(async () => {
                 pendingIdleTimers.delete(rootSessionId)
+
+                try {
+                    const { data: messages } = await client.session.messages({
+                        path: { id: rootSessionId }
+                    })
+
+                    const lastAssistantMsg = (messages as Message[])
+                        .filter(m => m.info.role === "assistant")
+                        .at(-1)
+
+                    if (lastAssistantMsg) {
+                        const text = lastAssistantMsg.parts
+                            .filter(p => p.type === "text")
+                            .map(p => p.text ?? "")
+                            .join("")
+
+                        if (/<think/i.test(text) && !/<\/think>/i.test(text)) {
+                            rootSessionStatuses.set(rootSessionId, "running")
+                            updateTerminalTitle(ctx.directory, "thinking", logger)
+                            lastTerminalStatusSync = { rootSessionId, status: "thinking" }
+
+                            logger.debug("terminal-title", "Thinking still in progress, using thinking status", {
+                                rootSessionId
+                            })
+                            return
+                        }
+                    }
+                } catch {
+                    // Ignore errors checking thinking state
+                }
+
                 const effectiveStatus = getEffectiveTerminalStatus(rootSessionId)
 
                 if (
