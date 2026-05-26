@@ -2,13 +2,14 @@
 
 ## Version Bump Procedure
 
-버전 릴리스 시 다음 순서를 따른다:
+버전 릴리스 시 다음 순서를 따른다. **태그(`vX.Y.Z`)와 `package.json`의 `version` 필드가 반드시 정확히 일치해야 한다.**
 
-1. `package.json`의 `version` 필드 업데이트
-2. `npm run build` 로 빌드 확인
-3. 커밋: `chore: bump version to X.Y.Z`
-4. 푸시: `git push origin master`
-5. 태그: `git tag vX.Y.Z && git push origin vX.Y.Z`
+1. `package.json`의 `version` 필드를 새 버전으로 업데이트
+2. `node -e "const p = require('./package.json'); console.log('v' + p.version)"` 으로 태그와 버전이 일치하는지 검증
+3. `npm run build` 로 빌드 확인
+4. 커밋: `chore: bump version to X.Y.Z`
+5. `git tag vX.Y.Z` 로 태그 생성 후 `node -e "const p = require('./package.json'); if ('v'+p.version !== 'vX.Y.Z') throw new Error('tag/version mismatch')"` 재검증
+6. 푸시: `git push origin master && git push origin vX.Y.Z`
 
 ## Project Structure
 
@@ -25,4 +26,4 @@
 
 - 진입점: `session.idle` 이벤트 → `lib/title.ts` `updateSessionTitle`
 - 터미널 타이틀은 OSC escape sequence로 변경 (공식 plugin API 없음)
-- idle 전환에 3초 디바운스 적용 (running 이벤트 시 취소)
+- idle 전환에 5초 디바운스 적용 (running 이벤트 시 취소)
