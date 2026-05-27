@@ -29,6 +29,10 @@ export interface MessagePart {
     type: string
     text?: string
     synthetic?: boolean
+    state?: {
+        status?: string
+        [key: string]: any
+    }
 }
 
 export interface Message {

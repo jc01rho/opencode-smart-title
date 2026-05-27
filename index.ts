@@ -36,8 +36,6 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
     const rootSessionStatuses = new Map<string, Extract<TerminalStatus, "idle" | "running">>()
     const activeSubagentsByRoot = new Map<string, Map<string, number>>()
     const pendingIdleTimers = new Map<string, NodeJS.Timeout>()
-    const activeToolCalls = new Map<string, Map<string, string>>()
-    // rootSessionID → { toolCallID → toolName } — active background bash tasks etc.
     const getEventSessionId = (event: { properties: unknown }): string | undefined => {
         if (!event.properties || typeof event.properties !== "object") {
             return undefined
@@ -109,12 +107,6 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
 
     const getEffectiveTerminalStatus = (rootSessionId: string): TerminalStatus => {
         pruneExpiredSubagentActivity(rootSessionId)
-
-        // Check if there are active background tool calls (e.g., bash tasks)
-        const toolCalls = activeToolCalls.get(rootSessionId)
-        if (toolCalls && toolCalls.size > 0) {
-            return "running"
-        }
 
         if (rootSessionStatuses.get(rootSessionId) === "running") {
             return "running"
@@ -220,6 +212,22 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
                             })
                             return
                         }
+                    }
+
+                    // Check for running tool parts (background bash tasks etc.)
+                    const hasRunningToolParts = (messages as Message[]).some(msg =>
+                        msg.parts.some(p => p.state?.status === "running")
+                    )
+
+                    if (hasRunningToolParts) {
+                        rootSessionStatuses.set(rootSessionId, "running")
+                        updateTerminalTitle(ctx.directory, "running", logger)
+                        lastTerminalStatusSync = { rootSessionId, status: "running" }
+
+                        logger.debug("terminal-title", "Tool parts still running, keeping running status", {
+                            rootSessionId
+                        })
+                        return
                     }
                 } catch {
                     // Ignore errors checking thinking state
@@ -392,34 +400,10 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
             await syncTerminalStatus(sessionID, "running")
         },
         "tool.execute.before": async ({ sessionID }) => {
-            // Track active tool calls (e.g., background bash tasks using bash tool)
-            if (sessionID) {
-                let toolCalls = activeToolCalls.get(sessionID)
-                if (!toolCalls) {
-                    toolCalls = new Map()
-                    activeToolCalls.set(sessionID, toolCalls)
-                }
-                toolCalls.set(`${Date.now()}-${Math.random().toString(36).slice(2, 9)}`, "unknown")
-            }
             await syncTerminalStatus(sessionID, "running")
         },
         "tool.execute.after": async ({ sessionID }) => {
-            // Remove tracked tool call on completion
-            if (sessionID) {
-                const toolCalls = activeToolCalls.get(sessionID)
-                if (toolCalls) {
-                    // Remove oldest entry (FIFO)
-                    const firstKey = toolCalls.keys().next().value
-                    if (firstKey) {
-                        toolCalls.delete(firstKey)
-                    }
-                    if (toolCalls.size === 0) {
-                        activeToolCalls.delete(sessionID)
-                    }
-                }
-            }
-            // Don't call syncTerminalStatus — let idle debounce handle it, or
-            // let running events from other sources keep the status
+            // No-op: idle debounce timer checks running tool parts directly
         }
     }
 }
