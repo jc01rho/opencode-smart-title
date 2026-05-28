@@ -2,6 +2,17 @@
  * Type definitions for Smart Title Plugin
  */
 
+export interface SessionListItem {
+    id: string
+    parentID?: string
+    time: {
+        created: number
+        updated: number
+        archived?: number
+    }
+    [key: string]: unknown
+}
+
 export interface OpenCodeClient {
     session: {
         messages: (params: { path: { id: string } }) => Promise<any>

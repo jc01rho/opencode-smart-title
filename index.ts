@@ -16,7 +16,7 @@ import { getConfig } from "./lib/config.js"
 import { Logger } from "./lib/logger.js"
 import { updateSessionTitle, updateTerminalTitle, type TerminalStatus } from "./lib/title.js"
 import { getRootSessionID, isSubagentSession, sessionIdleCount } from "./lib/session.js"
-import type { Message } from "./lib/types.js"
+import type { Message, SessionListItem } from "./lib/types.js"
 import { join } from "path"
 import { homedir } from "os"
 
@@ -149,9 +149,9 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
         if (isSubagent) {
             if (status === "running") {
                 markSubagentActivity(rootSessionId, sessionId, true)
-            } else {
-                markSubagentActivity(rootSessionId, sessionId, false)
             }
+            // Don't remove on idle — subagents toggle idle/running frequently
+            // during tool execution. Removal happens via session.deleted or TTL expiry.
         } else {
             rootSessionStatuses.set(rootSessionId, status)
         }
@@ -186,6 +186,48 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
 
             const timer = setTimeout(async () => {
                 pendingIdleTimers.delete(rootSessionId)
+
+                // Check active subagents FIRST — query session.list to avoid event race conditions
+                pruneExpiredSubagentActivity(rootSessionId)
+                const cachedSubagents = activeSubagentsByRoot.get(rootSessionId)
+
+                // Verify active subagents via SDK in case event-based tracking missed them
+                let hasActiveSubagents = cachedSubagents && cachedSubagents.size > 0
+                if (!hasActiveSubagents) {
+                    try {
+                        const { data: sessions } = await (client as any).session.list({
+                            query: { roots: false }
+                        })
+                        const now = Date.now()
+                        hasActiveSubagents = sessions.some((s: SessionListItem) =>
+                            s.parentID === rootSessionId &&
+                            now - s.time.updated < SUBAGENT_ACTIVITY_TTL_MS
+                        )
+                    } catch {
+                        // Ignore errors - fall back to cached state
+                    }
+                }
+
+                if (hasActiveSubagents) {
+                    // Also update event-based tracking for future lookups
+                    if (!cachedSubagents || cachedSubagents.size === 0) {
+                        getActiveSubagentMap(rootSessionId).set("__sdk_placeholder__", Date.now())
+                    }
+                    const effectiveStatus = getEffectiveTerminalStatus(rootSessionId)
+                    if (
+                        lastTerminalStatusSync?.rootSessionId === rootSessionId &&
+                        lastTerminalStatusSync.status === effectiveStatus
+                    ) {
+                        return
+                    }
+                    updateTerminalTitle(ctx.directory, effectiveStatus, logger)
+                    lastTerminalStatusSync = { rootSessionId, status: effectiveStatus }
+                    logger.debug("terminal-title", "Debounced idle skipped: active subagents present", {
+                        rootSessionId,
+                        hasActiveSubagents
+                    })
+                    return
+                }
 
                 try {
                     const { data: messages } = await client.session.messages({
