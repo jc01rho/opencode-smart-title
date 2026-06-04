@@ -14,6 +14,7 @@
 ## Project Structure
 
 - `index.ts` — 플러그인 진입점, 이벤트 핸들링, 터미널 상태 동기화
+- `lib/event-classifier.ts` — 이벤트 타입 분류 (`SessionEventKind` + `classifySessionEvent`)
 - `lib/title.ts` — 세션 제목 생성, 터미널 타이틀 업데이트
 - `lib/session.ts` — 세션 유틸리티 (루트 세션 조회, 서브에이전트 판별)
 - `lib/context.ts` — 대화 컨텍스트 추출 및 포맷

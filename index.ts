@@ -16,12 +16,14 @@ import { getConfig } from "./lib/config.js"
 import { Logger } from "./lib/logger.js"
 import { updateSessionTitle, updateTerminalTitle, type TerminalStatus } from "./lib/title.js"
 import { getRootSessionID, isSubagentSession, sessionIdleCount } from "./lib/session.js"
+import { classifySessionEvent, EventDedupeTracker } from "./lib/event-classifier.js"
 import type { Message, SessionListItem } from "./lib/types.js"
 import { join } from "path"
 import { homedir } from "os"
 
 const SUBAGENT_ACTIVITY_TTL_MS = 5 * 60 * 1000
 const IDLE_DEBOUNCE_MS = 5000
+const EVENT_DEDUPE_WINDOW_MS = 1500
 
 const SmartTitlePlugin: Plugin = async (ctx) => {
     const config = getConfig(ctx)
@@ -365,75 +367,111 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
         logDirectory: join(homedir(), ".config", "opencode", "logs", "smart-title")
     })
 
+    const eventDedupeTracker = new EventDedupeTracker(EVENT_DEDUPE_WINDOW_MS)
+
     return {
         event: async ({ event }) => {
             const sessionId = getEventSessionId(event)
 
             if (event.type === "session.deleted") {
+                logger.debug("event", "Session deleted, cleaning up state", { sessionId })
                 await clearSubagentActivity(sessionId)
+
+                if (sessionId) {
+                    rootSessionStatuses.delete(sessionId)
+                    activeSubagentsByRoot.delete(sessionId)
+                    pendingIdleTimers.delete(sessionId)
+                    sessionIdleCount.delete(sessionId)
+                }
                 return
             }
 
-            const isLegacyIdleEvent =
-                event.type === "session.status" &&
-                event.properties.status?.type === "idle"
-            const isIdleEvent = event.type === "session.idle" || isLegacyIdleEvent
+            const classified = classifySessionEvent(event)
 
-            if (isIdleEvent) {
-                await syncTerminalStatus(sessionId, "idle")
-            } else if (event.type === "session.status") {
-                await syncTerminalStatus(sessionId, "running")
+            logger.debug("event", `Event classified: ${classified.label}`, {
+                sessionId: classified.sessionId,
+                kind: classified.kind,
+                dedupeKey: classified.dedupeKey
+            })
+
+            if (!eventDedupeTracker.shouldProcess(classified.dedupeKey)) {
+                logger.debug("event", `Deduplicated event: ${classified.label}`, {
+                    sessionId: classified.sessionId,
+                    dedupeKey: classified.dedupeKey,
+                    windowMs: EVENT_DEDUPE_WINDOW_MS
+                })
+                return
             }
 
-            if (isIdleEvent) {
-                logger.debug('event', 'Session became idle', { sessionId })
+            switch (classified.kind) {
+                case "session.idle":
+                    await syncTerminalStatus(classified.sessionId, "idle")
+                    break
+                case "session.running":
+                    await syncTerminalStatus(classified.sessionId, "running")
+                    break
+                case "session.error":
+                    await syncTerminalStatus(classified.sessionId, "idle")
+                    break
+                case "permission.updated":
+                case "permission.asked":
+                case "question.asked":
+                    await syncTerminalStatus(classified.sessionId, "running")
+                    break
+                default:
+                    break
+            }
 
-                if (!sessionId) {
-                    logger.debug('event', 'Skipping idle handling because session ID is unavailable', {
-                        eventType: event.type
-                    })
-                    return
-                }
+            if (classified.kind !== "session.idle") {
+                return
+            }
 
-                if (await isSubagentSession(client, sessionId, logger)) {
-                    logger.debug('event', 'Skipping AI title generation for subagent idle event', {
-                        sessionId
-                    })
-                    return
-                }
+            const sid = classified.sessionId
+            if (!sid) {
+                logger.debug("event", "Skipping idle handling: session ID unavailable", {
+                    eventType: event.type
+                })
+                return
+            }
 
-                const currentCount = (sessionIdleCount.get(sessionId) || 0) + 1
-                sessionIdleCount.set(sessionId, currentCount)
+            if (await isSubagentSession(client, sid, logger)) {
+                logger.debug("event", "Skipping title generation for subagent idle", {
+                    sessionId: sid
+                })
+                return
+            }
 
-                logger.debug('event', 'Idle count updated', {
-                    sessionId,
+            const currentCount = (sessionIdleCount.get(sid) || 0) + 1
+            sessionIdleCount.set(sid, currentCount)
+
+            logger.debug("event", "Idle count updated", {
+                sessionId: sid,
+                currentCount,
+                threshold: config.updateThreshold
+            })
+
+            if (currentCount % config.updateThreshold !== 0) {
+                logger.debug("event", "Threshold not reached, skipping title update", {
+                    sessionId: sid,
                     currentCount,
                     threshold: config.updateThreshold
                 })
-
-                if (currentCount % config.updateThreshold !== 0) {
-                    logger.debug('event', 'Threshold not reached, skipping title update', {
-                        sessionId,
-                        currentCount,
-                        threshold: config.updateThreshold
-                    })
-                    return
-                }
-
-                logger.info('event', 'Threshold reached, triggering title update for idle session', {
-                    sessionId,
-                    currentCount,
-                    threshold: config.updateThreshold
-                })
-
-                updateSessionTitle(client, sessionId, logger, config).catch((error) => {
-                    logger.error('event', 'Title update failed', {
-                        sessionId,
-                        error: error.message,
-                        stack: error.stack
-                    })
-                })
+                return
             }
+
+            logger.info("event", "Threshold reached, triggering title update", {
+                sessionId: sid,
+                currentCount,
+                threshold: config.updateThreshold
+            })
+
+            updateSessionTitle(client, sid, logger, config).catch((error) => {
+                logger.error("event", "Title update failed", {
+                    sessionId: sid,
+                    error: error.message,
+                    stack: error.stack
+                })
+            })
         },
         "chat.message": async ({ sessionID }) => {
             await syncTerminalStatus(sessionID, "running")
