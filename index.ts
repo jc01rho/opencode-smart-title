@@ -14,7 +14,7 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { getConfig } from "./lib/config.js"
 import { Logger } from "./lib/logger.js"
-import { updateSessionTitle, updateTerminalTitle, type TerminalStatus } from "./lib/title.js"
+import { updateSessionTitle, updateTerminalTitle, type TerminalStatus, clearTitleGenerationCooldown } from "./lib/title.js"
 import { getRootSessionID, isSubagentSession, sessionIdleCount } from "./lib/session.js"
 import { classifySessionEvent, EventDedupeTracker } from "./lib/event-classifier.js"
 import type { Message, SessionListItem } from "./lib/types.js"
@@ -382,6 +382,7 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
                     activeSubagentsByRoot.delete(sessionId)
                     pendingIdleTimers.delete(sessionId)
                     sessionIdleCount.delete(sessionId)
+                    clearTitleGenerationCooldown(sessionId)
                 }
                 return
             }
@@ -482,7 +483,7 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
         "tool.execute.before": async ({ sessionID }) => {
             await syncTerminalStatus(sessionID, "running")
         },
-        "tool.execute.after": async ({ sessionID }) => {
+        "tool.execute.after": async () => {
             // No-op: idle debounce timer checks running tool parts directly
         }
     }

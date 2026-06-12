@@ -8,9 +8,22 @@ import { basename } from "path"
 
 export type TerminalStatus = "idle" | "running" | "subagent" | "thinking"
 
-let lastTerminalTitle: string | null = null
 const inFlightSessionTitleUpdates = new Set<string>()
 const queuedSessionTitleUpdates = new Set<string>()
+const TITLE_GENERATION_COOLDOWN_MS = 30_000
+const lastTitleGenerationAt = new Map<string, number>()
+
+export function clearTitleGenerationCooldown(sessionId: string): void {
+    lastTitleGenerationAt.delete(sessionId)
+    inFlightSessionTitleUpdates.delete(sessionId)
+    queuedSessionTitleUpdates.delete(sessionId)
+}
+
+const TERMINAL_WRITE_COOLDOWN_MS = 3000
+
+let lastTerminalTitle: string | null = null
+let lastTerminalTitleWriteAt = 0
+let pendingTerminalTimer: NodeJS.Timeout | null = null
 
 type TerminalWriter = Pick<NodeJS.WriteStream, "write"> & {
     isTTY?: boolean
@@ -53,6 +66,28 @@ function wrapOscSequenceForTerminal(sequence: string): string {
     return `\u001bPtmux;${sequence.replace(/\u001b/g, "\u001b\u001b")}\u001b\\`
 }
 
+function writeTerminalTitle(
+    writer: TerminalWriter,
+    title: string,
+    logger: Logger,
+    status: TerminalStatus
+): void {
+    const osc0 = wrapOscSequenceForTerminal(`\u001b]0;${title}\u0007`)
+    const osc2 = wrapOscSequenceForTerminal(`\u001b]2;${title}\u0007`)
+
+    writer.write(osc0)
+    writer.write(osc2)
+    lastTerminalTitle = title
+    lastTerminalTitleWriteAt = Date.now()
+
+    logger.debug("terminal-title", "Terminal title updated", {
+        title,
+        status,
+        writer: writer === process.stdout ? "stdout" : "stderr",
+        tmux: Boolean(process.env.TMUX)
+    })
+}
+
 export function updateTerminalTitle(
     directory: string | undefined,
     status: TerminalStatus,
@@ -74,19 +109,40 @@ export function updateTerminalTitle(
             return
         }
 
-        const osc0 = wrapOscSequenceForTerminal(`\u001b]0;${title}\u0007`)
-        const osc2 = wrapOscSequenceForTerminal(`\u001b]2;${title}\u0007`)
+        const now = Date.now()
+        const timeSinceLastWrite = now - lastTerminalTitleWriteAt
 
-        writer.write(osc0)
-        writer.write(osc2)
-        lastTerminalTitle = title
+        // "running" always writes immediately for responsive feedback
+        if (status === "running" || timeSinceLastWrite >= TERMINAL_WRITE_COOLDOWN_MS) {
+            if (pendingTerminalTimer) {
+                clearTimeout(pendingTerminalTimer)
+                pendingTerminalTimer = null
+            }
 
-        logger.debug("terminal-title", "Terminal title updated", {
-            title,
-            status,
-            writer: writer === process.stdout ? "stdout" : "stderr",
-            tmux: Boolean(process.env.TMUX)
-        })
+            writeTerminalTitle(writer, title, logger, status)
+        } else {
+            // Throttle: cancel previous pending write, schedule new one with latest status
+            if (pendingTerminalTimer) {
+                clearTimeout(pendingTerminalTimer)
+            }
+
+            const delay = TERMINAL_WRITE_COOLDOWN_MS - timeSinceLastWrite
+
+            pendingTerminalTimer = setTimeout(() => {
+                pendingTerminalTimer = null
+                const throttledTitle = formatTerminalTitle(directory, status)
+
+                if (throttledTitle && throttledTitle !== lastTerminalTitle) {
+                    writeTerminalTitle(writer, throttledTitle, logger, status)
+                }
+            }, delay)
+
+            logger.debug("terminal-title", "Terminal title write throttled, queued for later", {
+                title,
+                status,
+                cooldownRemainingMs: delay
+            })
+        }
     } catch (error: any) {
         logger.warn("terminal-title", "Failed to update terminal title", {
             status,
@@ -94,6 +150,7 @@ export function updateTerminalTitle(
         })
     }
 }
+
 
 export function cleanTitle(raw: string): string {
     let cleaned = raw.replace(/<think[\s\S]*?<\/think>/gi, "")
@@ -199,6 +256,18 @@ export async function updateSessionTitle(
         return
     }
 
+    const now = Date.now()
+    const lastGen = lastTitleGenerationAt.get(sessionId)
+
+    if (lastGen && now - lastGen < TITLE_GENERATION_COOLDOWN_MS) {
+        logger.debug('update-title', 'Skipping title update due to cooldown', {
+            sessionId,
+            elapsedMs: now - lastGen,
+            cooldownMs: TITLE_GENERATION_COOLDOWN_MS
+        })
+        return
+    }
+
     inFlightSessionTitleUpdates.add(sessionId)
 
     try {
@@ -251,6 +320,8 @@ export async function updateSessionTitle(
             path: { id: sessionId },
             body: { title: newTitle }
         })
+
+        lastTitleGenerationAt.set(sessionId, Date.now())
 
         logger.info('update-title', 'Session title updated successfully', {
             sessionId,

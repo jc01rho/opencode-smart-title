@@ -17,6 +17,8 @@ An OpenCode plugin that generates better session titles from conversation contex
   - `🤖 <project>` when only subagents are active
   - `💤 <project>` when the session is idle
 - Avoids redundant terminal writes and duplicate in-flight title updates
+- Throttles terminal title writes (3s cooldown) to prevent rapid status oscillation spam
+- Enforces 30s cooldown between AI title generations per session
 - Uses OpenCode authentication flow instead of requiring separate API keys in this plugin
 
 ## How it works
@@ -90,6 +92,7 @@ Terminal title sync is best-effort.
 - It sanitizes terminal title content before writing
 - It skips writes when no TTY is available
 - It avoids rewriting the same title repeatedly
+- Terminal title writes are throttled to at most once every 3 seconds (`running` bypasses for responsive feedback)
 
 This part of the plugin is the most environment-sensitive behavior in the project.
 If you are not using Windows Terminal with WSL2 Ubuntu, expect possible differences.
