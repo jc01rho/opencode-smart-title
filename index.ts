@@ -15,7 +15,7 @@ import type { Plugin } from "@opencode-ai/plugin"
 import { getConfig } from "./lib/config.js"
 import { Logger } from "./lib/logger.js"
 import { updateSessionTitle, updateTerminalTitle, type TerminalStatus, clearTitleGenerationCooldown } from "./lib/title.js"
-import { getRootSessionID, isSubagentSession, sessionIdleCount } from "./lib/session.js"
+import { getRootSessionID, isSubagentSession, sessionIdleCount, cleanupSession } from "./lib/session.js"
 import { classifySessionEvent, EventDedupeTracker } from "./lib/event-classifier.js"
 import type { Message, SessionListItem } from "./lib/types.js"
 import { join } from "path"
@@ -380,9 +380,9 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
                 if (sessionId) {
                     rootSessionStatuses.delete(sessionId)
                     activeSubagentsByRoot.delete(sessionId)
-                    pendingIdleTimers.delete(sessionId)
-                    sessionIdleCount.delete(sessionId)
+                    cancelPendingIdleTimer(sessionId)
                     clearTitleGenerationCooldown(sessionId)
+                    cleanupSession(sessionId)
                 }
                 return
             }

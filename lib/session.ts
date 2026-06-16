@@ -155,3 +155,15 @@ export async function isSubagentSession(
 }
 
 export const sessionIdleCount = new Map<string, number>()
+
+/**
+ * Clean up all per-session caches when a session is deleted.
+ * Prevents unbounded growth of caches when many subagent sessions are created
+ * and destroyed during orchestrated parallel task runs.
+ */
+export function cleanupSession(sessionId: string): void {
+    subagentSessionCache.delete(sessionId)
+    sessionRootCache.delete(sessionId)
+    // In-flight checks will resolve on their own; no cleanup needed.
+    sessionIdleCount.delete(sessionId)
+}
