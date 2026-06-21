@@ -15,6 +15,7 @@ import type { Plugin } from "@opencode-ai/plugin"
 import { getConfig } from "./lib/config.js"
 import { Logger } from "./lib/logger.js"
 import { updateSessionTitle, updateTerminalTitle, type TerminalStatus, clearTitleGenerationCooldown } from "./lib/title.js"
+import { setMaxListeners } from "events"
 import { getRootSessionID, isSubagentSession, sessionIdleCount, cleanupSession } from "./lib/session.js"
 import { classifySessionEvent, EventDedupeTracker } from "./lib/event-classifier.js"
 import type { Message, SessionListItem } from "./lib/types.js"
@@ -31,6 +32,10 @@ const SmartTitlePlugin: Plugin = async (ctx) => {
     if (!config.enabled) {
         return {}
     }
+
+    // GlobalBus doesn't set its own listener limit; raise the default so 50+
+    // subagents don't trip MaxListenersExceededWarning (Node default: 10).
+    setMaxListeners(0)
 
     const logger = new Logger(config.debug)
     const { client } = ctx
